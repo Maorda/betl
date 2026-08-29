@@ -34,7 +34,11 @@ class PDFHybridExtractor:
         try:
             from paddleocr import PaddleOCR
             # use_angle_cls endereza el texto si la página fue escaneada chueca
-            self.paddle_ocr = PaddleOCR(use_angle_cls=True, lang=self.language, show_log=False)
+            self.paddle_ocr = PaddleOCR(
+                use_angle_cls=True, 
+                lang=self.language,
+                enable_mkldnn=False  # Desactiva la aceleración que causa el crash en Windows
+            )
             logger.info(f"[PDF Extractor] PaddleOCR inicializado. Idioma={self.language}")
         except ImportError:
             logger.warning("[PDF Extractor] PaddleOCR no instalado. Solo se leerá texto nativo.")
@@ -106,7 +110,12 @@ class PDFHybridExtractor:
                 raise ValueError("cv2.imdecode retornó None")
 
             # Ejecución del OCR
-            resultado = self.paddle_ocr.ocr(imagen_cv2, cls=True)
+            resultado = self.paddle_ocr.ocr(imagen_cv2)
+            # AGREGA ESTAS 4 LÍNEAS PARA DEBUG:
+            print(f"\n=== DEBUG PÁGINA {num_pag} ===")
+            print(f"Tipo de dato devuelto: {type(resultado)}")
+            print(f"Contenido crudo: {resultado}")
+            print("==============================\n")
             return self._parsear_salida_paddle(resultado)
 
         except Exception as exc:
@@ -116,23 +125,42 @@ class PDFHybridExtractor:
     @staticmethod
     def _parsear_salida_paddle(resultado_ocr: Any) -> str:
         """
-        Extrae limpiamente el texto de la compleja estructura de listas de PaddleOCR.
-        Estructura típica: [ [ [coordenadas], ("texto", confianza) ], ... ]
+        Extrae limpiamente el texto buscando recursivamente en la salida del OCR.
+        Soporta la estructura clásica (tuplas) y la estructura moderna de PaddleX (diccionarios con 'rec_texts').
         """
-        if not resultado_ocr or not resultado_ocr[0]:
+        if not resultado_ocr:
             return ""
 
         lineas_extraidas = []
+
+        def buscar_texto(elemento):
+            # 1. Soporte para la nueva estructura (Diccionarios que contienen 'rec_texts')
+            if isinstance(elemento, dict):
+                if 'rec_texts' in elemento and isinstance(elemento['rec_texts'], list):
+                    for texto in elemento['rec_texts']:
+                        if isinstance(texto, str) and texto.strip():
+                            lineas_extraidas.append(texto.strip())
+                else:
+                    # Explorar los valores del diccionario por si hay listas anidadas
+                    for valor in elemento.values():
+                        buscar_texto(valor)
+            
+            # 2. Soporte para listas (iteramos por cada elemento)
+            elif isinstance(elemento, list):
+                for item in elemento:
+                    if item is not None:
+                        buscar_texto(item)
+            
+            # 3. Soporte para la estructura clásica (Tuplas de (texto, confianza))
+            elif isinstance(elemento, tuple) and len(elemento) == 2:
+                texto = str(elemento[0]).strip()
+                # Verificamos que el segundo elemento sea un número (la confianza)
+                if texto and isinstance(elemento[1], (float, int)):
+                    lineas_extraidas.append(texto)
+
         try:
-            for linea in resultado_ocr[0]:
-                if isinstance(linea, (list, tuple)) and len(linea) >= 2:
-                    datos_texto = linea[1]
-                    if isinstance(datos_texto, (list, tuple)) and len(datos_texto) >= 1:
-                        texto = str(datos_texto[0]).strip()
-                        if texto:
-                            lineas_extraidas.append(texto)
-                            
+            buscar_texto(resultado_ocr)
         except Exception as exc:
-            logger.debug(f"[PDF Extractor] Error parseando estructura OCR: {exc}")
+            logger.error(f"[PDF Extractor] Error parseando estructura OCR: {exc}")
 
         return "\n".join(lineas_extraidas)

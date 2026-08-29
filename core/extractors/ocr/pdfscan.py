@@ -87,7 +87,6 @@ class PDFOCRExtractor:
             from paddleocr import PaddleOCR
 
             self.paddle_ocr = PaddleOCR(
-                use_angle_cls=True,
                 lang=self.language,
             )
 
@@ -285,7 +284,7 @@ class PDFOCRExtractor:
 
             resultado = self.paddle_ocr.ocr(
                 imagen,
-                cls=True
+                #cls=True
             )
 
         except Exception as exc:

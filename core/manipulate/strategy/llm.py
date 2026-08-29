@@ -12,7 +12,7 @@ class ManipulateLLMService:
         self,
         modelo: Optional[str] = None,
         url_ollama: Optional[str] = None,
-        timeout: int = 60
+        timeout: int = 180
     ):
         self.modelo = modelo or "qwen3:8b"
         self.url_ollama = url_ollama or "http://localhost:11434/api/generate"
