@@ -111,11 +111,7 @@ class PDFHybridExtractor:
 
             # Ejecución del OCR
             resultado = self.paddle_ocr.ocr(imagen_cv2)
-            # AGREGA ESTAS 4 LÍNEAS PARA DEBUG:
-            print(f"\n=== DEBUG PÁGINA {num_pag} ===")
-            print(f"Tipo de dato devuelto: {type(resultado)}")
-            print(f"Contenido crudo: {resultado}")
-            print("==============================\n")
+            
             return self._parsear_salida_paddle(resultado)
 
         except Exception as exc:

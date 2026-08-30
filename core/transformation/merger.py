@@ -37,8 +37,13 @@ class MergerService:
 
         logger.info("Iniciando fusión de datos Regex y LLM...")
 
+        # Normalizar datos de regex para extraer el valor real si vienen envueltos en metadatos
+        datos_regex_normalizados = {
+            k: self._normalizar_valor_regex(v) for k, v in datos_regex.items()
+        }
+
         # 1. Consolidación bruta de estructuras
-        datos_consolidados = self._merge_deep(datos_llm, datos_regex)
+        datos_consolidados = self._merge_deep(datos_llm, datos_regex_normalizados)
 
         # 2. Aplicación de Contrato / DTO Mapper si está presente
         if contrato:
@@ -119,3 +124,25 @@ class MergerService:
         if isinstance(val, str) and not val.strip():
             return False
         return True
+    @staticmethod
+    @staticmethod
+    def _normalizar_valor_regex(val: Any) -> Any:
+        """
+        Si el valor es un diccionario con 'value', extrae el valor interno.
+        Si es una lista, la aplana y la convierte en un string limpio para evitar corchetes.
+        """
+        if isinstance(val, dict):
+            if "value" in val:
+                return MergerService._normalizar_valor_regex(val["value"])
+            return {k: MergerService._normalizar_valor_regex(v) for k, v in val.items()}
+        
+        elif isinstance(val, list):
+            # Filtrar elementos nulos/vacíos y unirlos en una cadena de texto limpia
+            elementos = [str(item).strip() for item in val if item is not None and str(item).strip()]
+            if not elementos:
+                return None
+            # Si prefieres solo el primer elemento usa: return elementos[0]
+            # Si prefieres unirlos todos en texto plano usa: 
+            return ", ".join(elementos)
+            
+        return val
