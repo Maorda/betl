@@ -1,48 +1,95 @@
-from typing import Any, Dict, Optional, Set
-from core.transformation.factory.mapper_factory import DtoTransformerUtils
+import re
+from typing import Any, Dict
+from core.decorators.contract import contract
+from core.decorators.strategy import campo, regex_strategy, llm_strategy
 
 
-class DtoMapper_expediente:
-    """Contrato DTO adaptado a Opción 1 con búsqueda resiliente de Opción 2."""
-
-    CAMPOS_PERMITIDOS_EXPEDIENTE: Set[str] = {"numero"}
-    CAMPOS_PERMITIDOS_PREDIO: Set[str] = {"partidaRegistral", "direccion"}
-
-    MAPEOS_DEFAULT: Dict[str, Any] = {
-        "mapeo_expediente": {
-            "numero": "numero_expediente"
+@contract(
+    mapper_type="remate_judicial",
+    version="2.0.0",
+    metadata={
+        "description": "Contrato de extracción para edictos de remate judicial",
+        "mapeo_dto": {
+            "expediente": {"numero": "numero_expediente"},
+            "predio": {
+                "partidaRegistral": "partida_electronica",
+                "direccion": "direccion",
+            },
         },
-        "mapeo_predio": {
-            "partidaRegistral": "partida_electronica",
-            "direccion": "direccion"
-        }
-    }
+    },
+)
+class MiContratoRemate:
+    """Contrato estructurado para la extracción de datos en edictos de remate judicial."""
 
-    def __init__(self, transformer: DtoTransformerUtils) -> None:
-        self.transformer = transformer
+    @campo(
+        data_type="string",
+        description="Número único de expediente judicial o de proceso.",
+        required=True,
+    )
+    @regex_strategy(
+        pattern=r"(?:Exp\.?|Expediente[:\s]*)?([0-9]{4,5}[-\/][0-9]{4}[-\/][0-9]?[-\/][0-9]{4}[-\/][A-Z]{2}[-\/][A-Z]{2}[-\/][0-9]{2}|[0-9-]+/[0-9]{4})",
+        flags=re.IGNORECASE,
+        enabled=True,
+    )
+    @llm_strategy(
+        instruction=(
+            "Busca el número de expediente judicial completo (Ej formato: 01234-2023-0-1001-JR-CI-01 "
+            "o similar). Si no lo encuentras exacto, extrae lo más cercano."
+        ),
+        enabled=True,
+    )
+    def numero_expediente(self) -> None:
+        pass
 
-    def adaptar_a_dto(self, datos: Dict[str, Any], mapeos: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        if not datos or not isinstance(datos, dict):
-            datos = {}
+    @campo(
+        data_type="string",
+        description="Número de registro del inmueble en Registros Públicos (Partida Electrónica, Ficha, Tomo).",
+        required=False,
+    )
+    @regex_strategy(
+        pattern=r"(?:Partida|P\.?E\.?|Ficha|Tomo)\s*(?:N[°º]?|\#)?\s*([0-9A-Z\-]{5,15})\b",
+        flags=re.IGNORECASE,
+        enabled=True,
+    )
+    @llm_strategy(
+        instruction=(
+            "Busca el número de partida electrónica, ficha o tomo registral en SUNARP "
+            "(Ej: P21012001 o números de 8 dígitos)."
+        ),
+        enabled=True,
+    )
+    def partida_electronica(self) -> None:
+        pass
 
-        mapeos = mapeos if mapeos is not None else self.MAPEOS_DEFAULT
+    @campo(
+        data_type="string",
+        description="Ubicación física completa de la propiedad.",
+        required=False,
+    )
+    @llm_strategy(
+        instruction=(
+            "Extrae la dirección exacta o ubicación del inmueble mencionada en el documento "
+            "(calle, distrito, provincia, departamento)."
+        ),
+        enabled=True,
+    )
+    def direccion(self) -> None:
+        pass
 
-        # Resiliencia de búsqueda (funciona con diccionarios planos o anidados)
-        expediente_raw = datos.get("expediente", datos)
-        predio_raw = datos.get("predio", datos)
+    def adaptar_a_dto(self, datos: Dict[str, Any]) -> Dict[str, Any]:
+        """Aplica el mapeo estructurado definido en los metadatos del contrato."""
+        meta = getattr(self, "_metadata", {})
+        mapeo = meta.get("mapeo_dto", {})
+        if not mapeo:
+            return datos
 
-        return {
-            "expediente": self.transformer.mapear_seccion(
-                expediente_raw,
-                mapeos.get("mapeo_expediente"),
-                self.CAMPOS_PERMITIDOS_EXPEDIENTE
-            ),
-            "predio": self.transformer.mapear_seccion(
-                predio_raw,
-                mapeos.get("mapeo_predio"),
-                self.CAMPOS_PERMITIDOS_PREDIO
-            )
-        }
+        resultado: Dict[str, Any] = {}
+        for seccion, campos in mapeo.items():
+            if isinstance(campos, dict):
+                resultado[seccion] = {}
+                for campo_dest, campo_orig in campos.items():
+                    resultado[seccion][campo_dest] = datos.get(campo_orig)
+            else:
+                resultado[seccion] = datos.get(campos)
 
-    def filtrar_y_mapear(self, datos: Dict[str, Any]) -> Dict[str, Any]:
-        return self.adaptar_a_dto(datos)
+        return resultado

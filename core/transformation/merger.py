@@ -28,7 +28,7 @@ class MergerService:
         datos_consolidados = self._merge_deep(datos_llm, datos_regex_normalizados)
 
         if contrato:
-            logger.info("Aplicando contrato de mapeo DTO...")
+            logger.info("Aplicando contrato de mapeo / DTO...")
             return self._aplicar_contrato(datos_consolidados, contrato)
 
         logger.info("Fusión finalizada sin contrato DTO.")
@@ -36,7 +36,6 @@ class MergerService:
 
     def _aplicar_contrato(self, datos: Dict[str, Any], contrato: Union[Type[Any], Any]) -> Dict[str, Any]:
         try:
-            # Si se pasa una clase no instanciada, se auto-instancia inyectando el transformer
             if isinstance(contrato, type):
                 try:
                     instancia = contrato(transformer=self.transformer)
@@ -54,7 +53,7 @@ class MergerService:
             if callable(instancia):
                 return instancia(datos)
 
-            logger.warning("El contrato provisto no es compatible. Se retornan datos consolidados.")
+            logger.warning("El contrato provisto no posee método de adaptación compatible. Retornando consolidados.")
             return datos
 
         except Exception as e:
@@ -97,25 +96,25 @@ class MergerService:
 
     @staticmethod
     def _normalizar_valor_regex(val: Any) -> Any:
-        # Caso 1: Es un diccionario con metadatos
+        # Caso 1: Diccionario con metadatos o valor interno
         if isinstance(val, dict):
             if "value" in val:
                 return MergerService._normalizar_valor_regex(val["value"])
-            return {k: MergerService._normalizar_valor_regex(v) for k, v in val.items()}
-        
-        # Caso 2: Es una lista de resultados (Bug corregido)
+            if "_match" in val:
+                return MergerService._normalizar_valor_regex(val["_match"])
+            return {k: MergerService._normalizar_valor_regex(v) for k, v in val.items() if not k.startswith("_")}
+
+        # Caso 2: Lista de evidencias/coincidencias
         elif isinstance(val, list):
-            # 1. Normalizar cada elemento internamente primero (extrae los 'value')
             elementos_normalizados = [
-                MergerService._normalizar_valor_regex(item) 
+                MergerService._normalizar_valor_regex(item)
                 for item in val if item is not None
             ]
-            # 2. Convertir a string solo los valores limpios y aplanar
             elementos_str = [
-                str(item).strip() 
+                str(item).strip()
                 for item in elementos_normalizados if str(item).strip()
             ]
             return ", ".join(elementos_str) if elementos_str else None
-            
-        # Caso 3: Primitivos (str, int, etc.)
+
+        # Caso 3: Primitivos (str, int, float, etc.)
         return val

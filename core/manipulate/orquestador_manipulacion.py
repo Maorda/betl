@@ -1,31 +1,35 @@
+import os
+import sys
+import warnings
 import json
 import logging
 from typing import Dict, Any, Optional, List
 
+os.environ["GLOG_minloglevel"] = "3"
+os.environ["PPOCR_LOGGING"] = "0"
+os.environ["FLAGS_allocator_strategy"] = "naive_best_fit"
+warnings.filterwarnings("ignore")
+
+import logging
+logging.getLogger("ppocr").setLevel(logging.ERROR)
+logging.getLogger("paddle").setLevel(logging.ERROR)
+
 from core.extractors.ocr.orquestator_ocr import OCROrchestrator
 from core.manipulate.strategy.regex import ManipulateRegexService
 from core.manipulate.strategy.llm import ManipulateLLMService
+from core.transformation.merger import MergerService
 
 logger = logging.getLogger(__name__)
 
 
 class ManipulationOrchestrator:
-    """
-    Orquestador de la Fase 2: Manipulación y Estructuración Semántica de Datos.
-
-    Responsabilidad Única:
-    Coordinar el flujo de estructuración en cascada: delegando la obtención de 
-    texto plano a la Fase 1, ejecutando Regex como primera línea de defensa determinista,
-    pre-procesando los hallazgos, aplicando particionamiento inteligente (Chunking) 
-    y delegando al motor LLM de forma optimizada.
-    """
 
     def __init__(
         self,
         ocr_orchestrator: OCROrchestrator,
         regex_service: Optional[ManipulateRegexService] = None,
         llm_service: Optional[ManipulateLLMService] = None,
-        merger_service: Optional[Any] = None,
+        merger_service: Optional[MergerService] = None,
         chunk_size: int = 4000,
         chunk_overlap: int = 200,
     ):
@@ -42,33 +46,83 @@ class ManipulationOrchestrator:
     def procesar_documento_pdf(
         self,
         pdf_bytes: bytes,
-        prompt_instruccion: str,
         contrato: Optional[Any] = None,
+        prompt_instruccion: str = "Extrae la información estructurada del documento según el contrato.",
         modo_pdf: str = "hybrid",
         patrones_temporales: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """
-        Flujo completo a partir de un archivo PDF en bytes.
-        """
-        # 1. Delegar obtención de texto a la Fase 1 (OCROrchestrator)
-        texto_ocr = self.ocr_orchestrator.extraer_texto_pdf(pdf_bytes, modo=modo_pdf)
+        texto_ocr = self.ocr_orchestrator.extraer_texto_pdf(
+            pdf_bytes=pdf_bytes,
+            modo=modo_pdf
+        )
 
         if not texto_ocr or not texto_ocr.strip():
-            logger.warning("[ManipulationOrchestrator] No se obtuvo texto del PDF. Proceso cancelado.")
-            return {}
+            return {"datos_regex": {}, "datos_llm": {}, "error": "No se pudo extraer texto del documento PDF."}
 
-        # 2. Ejecutar la manipulación de datos sobre el texto obtenido
         return self.procesar_texto_plano(
             texto_ocr=texto_ocr,
             prompt_instruccion=prompt_instruccion,
+            estructura_esperada=contrato,
             patrones_temporales=patrones_temporales,
         )
 
+    def procesar_texto_plano(
+        self,
+        texto_ocr: str,
+        prompt_instruccion: str,
+        estructura_esperada: Optional[Any] = None,
+        patrones_temporales: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        datos_regex_limpios = {}
+        resultados_llm_parciales = []
+
+        # 1. Aplicar Regex (Corrección de método extraer_datos)
+        if self.regex_service:
+            try:
+                # Pasar el contrato si no hay patrones temporales explícitos
+                patrones = patrones_temporales or estructura_esperada
+                datos_regex_crudos = self.regex_service.extraer_datos(texto_ocr, patrones)
+                datos_regex_limpios = self._preprocesar_datos_regex(datos_regex_crudos)
+            except Exception as e:
+                logger.error(f"[Regex] Error ejecutando extracción: {e}", exc_info=True)
+
+        # 2. Dividir texto en chunks para el LLM
+        chunks = self._dividir_texto(texto_ocr)
+        
+        # 3. Procesar chunks con el LLM
+        for chunk in chunks:
+            if self.llm_service:
+                prompt_para_llm = prompt_instruccion
+                if datos_regex_limpios:
+                    prompt_para_llm += f"\n\nContexto previo extraído por Regex: {json.dumps(datos_regex_limpios, ensure_ascii=False)}"
+
+                res_chunk = self.llm_service.extraer_entidades(
+                    texto_ocr=chunk,
+                    prompt_instruccion=prompt_para_llm,
+                    estructura_esperada=estructura_esperada
+                )
+                if res_chunk:
+                    resultados_llm_parciales.append(res_chunk)
+
+        # Consolidador interno para chunks de LLM
+        datos_llm_consolidados = {}
+        for res in resultados_llm_parciales:
+            if isinstance(res, dict):
+                datos_llm_consolidados.update({k: v for k, v in res.items() if v is not None})
+
+        # 4. Fusionar resultados usando MergerService (Corrección de llamada)
+        if self.merger_service:
+            resultado_final = self.merger_service.fusionar(
+                datos_regex=datos_regex_limpios,
+                datos_llm=datos_llm_consolidados,
+                contrato=estructura_esperada
+            )
+        else:
+            resultado_final = {**datos_llm_consolidados, **datos_regex_limpios}
+
+        return resultado_final
+
     def _dividir_texto(self, texto: str) -> List[str]:
-        """
-        Divide el texto en fragmentos (chunks) inteligentes respetando saltos de línea 
-        y párrafos para evitar cortes abruptos en el contexto del LLM.
-        """
         if len(texto) <= self.chunk_size:
             return [texto]
 
@@ -79,106 +133,42 @@ class ManipulationOrchestrator:
         while inicio < n:
             fin = min(inicio + self.chunk_size, n)
             
-            # Intentar recortar en un salto de doble línea (párrafo) si no estamos al final
             if fin < n:
                 corte = texto.rfind('\n\n', inicio, fin)
                 if corte != -1 and corte > inicio + int(self.chunk_size * 0.5):
                     fin = corte + 2
                 else:
-                    # Si no hay salto doble, buscar salto simple
                     corte_simple = texto.rfind('\n', inicio, fin)
                     if corte_simple != -1 and corte_simple > inicio + int(self.chunk_size * 0.5):
                         fin = corte_simple + 1
 
             chunks.append(texto[inicio:fin])
-            # Desplazamiento considerando el solapamiento (overlap) para no perder contexto en los bordes
             inicio = fin - self.chunk_overlap if fin < n else n
 
         return chunks
 
     def _preprocesar_datos_regex(self, datos_regex: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Limpia y aplana los resultados de Regex para evitar inyectar listas crudas 
-        o formatos tipo Python repr() al prompt del LLM.
-        """
+        """Extrae el valor o texto del match de los diccionarios de evidencia."""
         datos_limpios = {}
         for k, v in datos_regex.items():
             if isinstance(v, list):
-                # Filtrar elementos vacíos o nulos y unirlos en una cadena de texto limpia
-                elementos = [str(item).strip() for item in v if item]
+                elementos = []
+                for item in v:
+                    if isinstance(item, dict):
+                        val = item.get("value") or item.get("_match")
+                        if val:
+                            elementos.append(str(val).strip())
+                    elif item:
+                        elementos.append(str(item).strip())
+                
                 if elementos:
-                    datos_limpios[k] = ", ".join(elementos)
+                    datos_limpios[k] = ", ".join(elementos) if len(elementos) > 1 else elementos[0]
                 else:
                     datos_limpios[k] = None
+            elif isinstance(v, dict):
+                datos_limpios[k] = v.get("value") or v.get("_match")
             elif v is not None and str(v).strip():
                 datos_limpios[k] = v
             else:
                 datos_limpios[k] = None
         return datos_limpios
-
-    def procesar_texto_plano(
-        self,
-        texto_ocr: str,
-        prompt_instruccion: str,
-        patrones_temporales: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        if not texto_ocr or not texto_ocr.strip():
-            return {"datos_regex": {}, "datos_llm": {}}
-
-        datos_regex = {}
-        
-        # --- PASO 1: Extracción Determinista Global con Regex ---
-        if self.regex_service:
-            logger.info("[ManipulationOrchestrator] Ejecutando motor Regex de primera línea (global)...")
-            datos_regex = self.regex_service.extraer_datos(
-                texto=texto_ocr,
-                patrones_temporales=patrones_temporales,
-            )
-
-        # --- PASO 2: Pre-procesar Regex y Preparar contexto para el LLM ---
-        prompt_para_llm = prompt_instruccion
-        if datos_regex:
-            logger.info("[ManipulationOrchestrator] Pre-procesando y limpiando hallazgos de Regex para el contexto del LLM...")
-            datos_regex_limpios = self._preprocesar_datos_regex(datos_regex)
-            contexto_regex_str = json.dumps(datos_regex_limpios, indent=2, ensure_ascii=False)
-            
-            prompt_para_llm = (
-                f"{prompt_instruccion.strip()}\n\n"
-                f"--- DATO(S) PREVIAMENTE EXTRAÍDOS POR REGEX ---\n"
-                f"{contexto_regex_str}\n"
-                f"Usa los datos anteriores como referencia confirmada. Concéntrate exclusivamente en buscar en el texto los campos con valor null o faltantes.\n"
-            )
-
-        # --- PASO 3: Chunking y Ejecución del LLM por Fragmentos ---
-        datos_llm = {}
-        if self.llm_service:
-            chunks = self._dividir_texto(texto_ocr)
-            logger.info(f"[ManipulationOrchestrator] Texto dividido en {len(chunks)} chunk(s) para procesamiento optimizado.")
-
-            resultados_parciales = []
-            for idx, chunk in enumerate(chunks, start=1):
-                logger.info(f"[ManipulationOrchestrator] Enviando chunk {idx}/{len(chunks)} al motor LLM...")
-                
-                res_chunk = self.llm_service.extraer_entidades(
-                    texto_ocr=chunk,
-                    prompt_instruccion=prompt_para_llm,
-                )
-                if isinstance(res_chunk, dict) and res_chunk:
-                    resultados_parciales.append(res_chunk)
-
-            # --- PASO 4: Consolidación de Resultados de Chunks ---
-            if self.merger_service and hasattr(self.merger_service, "fusionar_resultados_chunks"):
-                datos_llm = self.merger_service.fusionar_resultados_chunks(resultados_parciales)
-            else:
-                # Fusión robusta descartando None/vacíos entre chunks
-                datos_llm = {}
-                for res in resultados_parciales:
-                    for k, v in res.items():
-                        if v is not None and str(v).strip() != "" and str(v).lower() not in ["none", "null"]:
-                            if not datos_llm.get(k):
-                                datos_llm[k] = v
-
-        return {
-            "datos_regex": datos_regex,
-            "datos_llm": datos_llm,
-        }

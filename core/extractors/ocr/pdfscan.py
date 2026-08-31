@@ -54,6 +54,7 @@ class PDFOCRExtractor:
         self,
         dpi: int = 200,
         language: str = "es",
+        show_log=False
     ):
         """
         dpi:
@@ -67,6 +68,7 @@ class PDFOCRExtractor:
         self.language = language
 
         self.paddle_ocr = None
+        self.show_log = show_log
 
         self._inicializar_paddle()
 
