@@ -35,16 +35,12 @@ class ManipulateLLMService:
         prompt_instruccion: str, 
         estructura_esperada: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """
-        Envía el texto y las directivas al motor LLM local optimizando latencia
-        y garantizando el parseo correcto de objetos JSON.
-        """
         if not texto_ocr or not texto_ocr.strip():
             logger.warning("[LLM-Extractor] Se recibió un texto OCR vacío para procesar.")
             return {}
 
-        # Concatenación directa: el prompt_instruccion generado por LLMSchemaBuilder ya incluye las reglas
-        prompt_completo = f"{prompt_instruccion}\n\n[DOCUMENTO OCR A ANALIZAR]:\n{texto_ocr}"
+        # Construcción limpia del prompt final sin duplicaciones de placeholders
+        prompt_completo = f"{prompt_instruccion.strip()}\n\n[DOCUMENTO OCR A ANALIZAR]:\n{texto_ocr.strip()}"
 
         payload = {
             "model": self.modelo,
@@ -54,8 +50,8 @@ class ManipulateLLMService:
             "options": {
                 "temperature": 0.0,
                 "top_p": 0.1,
-                "num_ctx": 4096,      # Reducido de 8192 a 4096 (suficiente para edictos, reduce uso de VRAM)
-                "num_predict": 1024   # Detiene la generación tan pronto como el JSON se completa
+                "num_ctx": 4096,
+                "num_predict": 1024
             }
         }
 
@@ -70,7 +66,6 @@ class ManipulateLLMService:
             resultado_api = response.json()
             contenido_respuesta = resultado_api.get("response", "{}")
             
-            # Sanitizar la respuesta eliminando etiquetas ```json ... ``` si las hubiere
             json_limpio = self._extraer_json_puro(contenido_respuesta)
             datos_extraidos = json.loads(json_limpio)
             

@@ -11,9 +11,9 @@ Tu única responsabilidad es analizar el texto OCR proporcionado y extraer dos c
 
 2. "direccion":
    - Extrae la ubicación física completa de la propiedad materia del proceso.
-   - Pistas en el texto (¡IMPORTANTE!): Rara vez se usa la palabra "dirección". Debes buscar bajo encabezados como "DESCRIPCIÓN DEL BIEN", o frases como "Inmueble ubicado en...", "el predio situado en...", "bien inmueble".
+   - Pistas en el texto: Rara vez se usa la palabra "dirección". Debes buscar bajo encabezados como "DESCRIPCIÓN DEL BIEN", o frases como "Inmueble ubicado en...", "el predio situado en...", "bien inmueble".
    - Alcance: Captura toda la cadena geográfica (calle, lote, manzana, sector, urbanización, centro poblado, distrito, provincia y departamento) tal como está escrita, omitiendo medidas de área (M2) si es posible.
-   - REGLA DE FORMATO: Aunque el contexto previo (Regex) contenga listas o corchetes, **la dirección final debe ser estrictamente un texto plano unificado y limpio**, jamás una lista de Python o JSON (nada de corchetes `[]` ni comillas internas).
+   - REGLA DE FORMATO: Aunque el contexto previo (Regex) contenga listas o corchetes, la dirección final debe ser estrictamente un texto plano unificado y limpio, jamás una lista.
 
 ### REGLAS ESTRICTAS DE SALIDA:
 - Tu respuesta debe ser ÚNICA y EXCLUSIVAMENTE un objeto JSON válido y parseable.
@@ -21,15 +21,12 @@ Tu única responsabilidad es analizar el texto OCR proporcionado y extraer dos c
 - Si un campo no se encuentra en el texto, su valor en el JSON debe ser null (sin comillas).
 - No inventes, no deduzcas y no alteres los datos originales. Extrae la información literal.
 
-### EJEMPLO DE ENTRADA (Texto OCR):
+### EJEMPLO DE ENTRADA:
 "...A. DESCRIPCIÓN DEL BIEN.- Inmueble ubicado en el Centro Poblado Balconcito Sector 3 Mz. M Lote 1A, distrito de Grocio Prado, provincia de Chincha, departamento de Ica, de un área de 228.20 M2, cuyas características obran inscritas en la partida electrónica N° P21012001 del registro de propiedad..."
 
-### EJEMPLO DE SALIDA (JSON Esperado):
+### EJEMPLO DE SALIDA:
 {
   "partida_electronica": "P21012001",
   "direccion": "Centro Poblado Balconcito Sector 3 Mz. M Lote 1A, distrito de Grocio Prado, provincia de Chincha, departamento de Ica"
 }
-
-A continuación, analiza el siguiente texto OCR y devuelve el JSON:
-{ocr_text}
 """

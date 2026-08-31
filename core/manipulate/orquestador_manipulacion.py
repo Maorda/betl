@@ -122,10 +122,6 @@ class ManipulationOrchestrator:
         prompt_instruccion: str,
         patrones_temporales: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """
-        Ejecuta la cascada inteligente: Regex global primero, pre-procesamiento de hallazgos,
-        división en Chunks y procesamiento optimizado por el LLM.
-        """
         if not texto_ocr or not texto_ocr.strip():
             return {"datos_regex": {}, "datos_llm": {}}
 
@@ -147,12 +143,10 @@ class ManipulationOrchestrator:
             contexto_regex_str = json.dumps(datos_regex_limpios, indent=2, ensure_ascii=False)
             
             prompt_para_llm = (
-                f"{prompt_instruccion}\n\n"
-                f"--- CONTEXTO PREVIO (DETECTADO AUTOMÁTICAMENTE POR REGEX) ---\n"
-                f"{contexto_regex_str}\n\n"
-                f"NOTA DE ORIENTACIÓN: Los datos anteriores ya han sido extraídos con alta precisión mediante patrones formales. "
-                f"Utilízalos como referencia confirmada, valida su coherencia con el documento y concéntrate en extraer "
-                f"los campos faltantes, resolver ambigüedades o procesar el texto libre restante."
+                f"{prompt_instruccion.strip()}\n\n"
+                f"--- DATO(S) PREVIAMENTE EXTRAÍDOS POR REGEX ---\n"
+                f"{contexto_regex_str}\n"
+                f"Usa los datos anteriores como referencia confirmada. Concéntrate exclusivamente en buscar en el texto los campos con valor null o faltantes.\n"
             )
 
         # --- PASO 3: Chunking y Ejecución del LLM por Fragmentos ---
@@ -176,12 +170,13 @@ class ManipulationOrchestrator:
             if self.merger_service and hasattr(self.merger_service, "fusionar_resultados_chunks"):
                 datos_llm = self.merger_service.fusionar_resultados_chunks(resultados_parciales)
             else:
-                # Fusión predeterminada combinando claves no vacías de los chunks
-                datos_llm = resultados_parciales[0] if resultados_parciales else {}
-                for res in resultados_parciales[1:]:
+                # Fusión robusta descartando None/vacíos entre chunks
+                datos_llm = {}
+                for res in resultados_parciales:
                     for k, v in res.items():
-                        if v and not datos_llm.get(k):
-                            datos_llm[k] = v
+                        if v is not None and str(v).strip() != "" and str(v).lower() not in ["none", "null"]:
+                            if not datos_llm.get(k):
+                                datos_llm[k] = v
 
         return {
             "datos_regex": datos_regex,

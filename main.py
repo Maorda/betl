@@ -3,46 +3,44 @@ import logging
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-# Configuración centralizada de logging
+# Silenciar el spam de PaddleOCR
+logging.getLogger("ppocr").setLevel(logging.ERROR)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
 logger = logging.getLogger("ETL-Pipeline")
 
-# --- Importaciones desde la raíz del proyecto ---
+
 from llm_patron import PROMPT_PARTIDA_DIRECCION
 from regex_patron import PATRONES_DOCUMENTO
+
+# Contratos y Utilidades
+from core.transformation.factory.mapper_factory import DtoTransformerUtils
 from contrato import DtoMapper_expediente
 
-# --- Fase 1: Extracción Física (OCR / PDF / Captcha) ---
+# Fase 1: Extracción
 from core.extractors.ocr.pdfnative import PDFTextExtractor
 from core.extractors.ocr.pdfscan import PDFOCRExtractor
 from core.extractors.ocr.pdf_hybrid_extractor import PDFHybridExtractor
 from core.extractors.ocr.captcha import CaptchaExtractor
 from core.extractors.ocr.orquestator_ocr import OCROrchestrator
 
-# --- Fase 2: Manipulación Semántica (Regex + LLM) ---
+# Fase 2: Manipulación
 from core.manipulate.strategy.regex import ManipulateRegexService
 from core.manipulate.strategy.llm import ManipulateLLMService
 from core.manipulate.orquestador_manipulacion import ManipulationOrchestrator
 
-# --- Fase 3: Transformación y Consolidación (Merger) ---
+# Fase 3: Consolidación
 from core.transformation.merger import MergerService
 
 
 def ejecutar_pipeline_etl(pdf_path: Path, captcha_path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
-    """
-    Orquesta y ejecuta las tres fases del pipeline ETL de documentos de forma segura.
-    """
     logger.info("=== INICIANDO PIPELINE ETL DE DOCUMENTOS ===")
     
     try:
-        # =====================================================================
         # FASE 1: EXTRACCIÓN FÍSICA
-        # =====================================================================
-        logger.info("--> [Fase 1] Inicializando Orquestador de Extracción...")
-        
         ocr_orchestrator = OCROrchestrator(
             extractor_native=PDFTextExtractor(),
             extractor_scan=PDFOCRExtractor(),
@@ -55,16 +53,12 @@ def ejecutar_pipeline_etl(pdf_path: Path, captcha_path: Optional[Path] = None) -
             logger.info(f"[Fase 1] Captcha resuelto: '{codigo_captcha}'")
 
         if not pdf_path.exists():
-            logger.error(f"No se encontró el archivo de prueba: {pdf_path}")
+            logger.error(f"No se encontró el archivo: {pdf_path}")
             return None
 
         pdf_bytes = pdf_path.read_bytes()
 
-        # =====================================================================
-        # FASE 2: MANIPULACIÓN SEMÁNTICA (REGEX + LLM EN CASCADA)
-        # =====================================================================
-        logger.info("--> [Fase 2] Inicializando Servicios de Manipulación...")
-
+        # FASE 2: MANIPULACIÓN SEMÁNTICA
         regex_service = ManipulateRegexService(patrones_iniciales=PATRONES_DOCUMENTO)
         llm_service = ManipulateLLMService(modelo="qwen3:8b", timeout=250)
 
@@ -80,26 +74,23 @@ def ejecutar_pipeline_etl(pdf_path: Path, captcha_path: Optional[Path] = None) -
             modo_pdf="hybrid"
         )
 
-        logger.info("[Fase 2] Extracción de datos bruta completada.")
-
-        # =====================================================================
-        # FASE 3: TRANSFORMACIÓN Y APLICACIÓN DE CONTRATO (MERGER)
-        # =====================================================================
-        logger.info("--> [Fase 3] Consolidando datos y aplicando DtoMapper_expediente...")
-
-        merger = MergerService(prioridad_regex=True)
+        # FASE 3: TRANSFORMACIÓN Y CONTRATO DTO
+        transformer_utils = DtoTransformerUtils()
+        mapper_expediente = DtoMapper_expediente(transformer=transformer_utils)
+        logger.info(f"Salida cruda LLM: {resultados_fase2.get('datos_llm')}")
+        merger = MergerService(prioridad_regex=True, transformer=transformer_utils)
         
         resultado_dto = merger.fusionar(
             datos_regex=resultados_fase2.get("datos_regex", {}),
             datos_llm=resultados_fase2.get("datos_llm", {}),
-            contrato=DtoMapper_expediente
+            contrato=mapper_expediente
         )
 
         logger.info("=== PIPELINE ETL PROCESADO EXITOSAMENTE ===")
         return resultado_dto
 
     except Exception as e:
-        logger.critical(f"Error crítico no controlado durante la ejecución del Pipeline: {e}", exc_info=True)
+        logger.critical(f"Error crítico durante el Pipeline: {e}", exc_info=True)
         return None
 
 
@@ -108,10 +99,8 @@ def main():
     pdf_path = base_dir / "pdftest.pdf"
     captcha_path = base_dir / "captchatest.png"
 
-    # Ejecutar pipeline
     resultado_dto = ejecutar_pipeline_etl(pdf_path=pdf_path, captcha_path=captcha_path)
 
-    # Imprimir salida si fue exitosa
     if resultado_dto:
         print("\n--- ESTRUCTURA DTO CAMELCASE FINAL (NESTJS COMPATIBLE) ---")
         print(json.dumps(resultado_dto, indent=2, ensure_ascii=False))
