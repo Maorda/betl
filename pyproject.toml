@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "betl"
-version = "0.1.0"
+version = "0.1.2"
 description = "Una descripción corta de tu librería"
 readme = "README.md"
 requires-python = ">=3.8"
