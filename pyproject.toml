@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "betl"
+version = "0.1.0"
+description = "Una descripción corta de tu librería"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "ddddocr==1.6.1",
+    "numpy==2.5.2",
+    "opencv_contrib_python==4.10.0.84",
+    "opencv_python==5.0.0.93",
+    "paddleocr==3.7.0",
+    "pydantic==2.13.5",
+    "pymupdf==1.28.2",
+    "Requests==2.34.2",
+]
+[tool.hatch.build.targets.wheel]
+packages = ["src/core"]
+
+[project.urls]
+Homepage = "https://github.com"
