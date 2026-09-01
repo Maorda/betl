@@ -84,20 +84,23 @@ class PDFOCRExtractor:
         completa dependa obligatoriamente de PaddleOCR.
         """
         import os
+        import logging as py_logging
         
         # 1. FIX: Desactivar MKLDNN a nivel de variables de entorno antes de importar
-        # Esto previene el crash de compatibilidad de atributos PIR en Windows
         os.environ["FLAGS_use_mkldnn"] = "0"
         os.environ["PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT"] = "0"
 
         try:
-
             from paddleocr import PaddleOCR
+
+            # 2. FIX: Silenciar los logs de PaddleOCR a través del logger estándar
+            # Esto reemplaza al parámetro 'show_log' que falla en tu versión
+            if not self.show_log:
+                py_logging.getLogger("ppocr").setLevel(py_logging.ERROR)
 
             self.paddle_ocr = PaddleOCR(
                 lang=self.language,
-                show_log=self.show_log,    # Respetamos la configuración de tus logs
-                enable_mkldnn=False        # 2. FIX: Desactivar explícitamente en el constructor
+                enable_mkldnn=False        # Mantenemos el fix vital de Windows
             )
 
             logger.info(
