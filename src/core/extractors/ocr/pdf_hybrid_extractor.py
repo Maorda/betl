@@ -3,8 +3,10 @@ from typing import Any, List, Optional
 import pymupdf as fitz
 import numpy as np
 import cv2
+from core.extractors.ocr.detectar_zonas_ocr_en_pdf_hibrido import detectar_zonas_ocr_en_pdf_hibrido
 
 logger = logging.getLogger(__name__)
+
 
 class PDFHybridExtractor:
     """
@@ -13,9 +15,11 @@ class PDFHybridExtractor:
     RESPONSABILIDAD:
     Convertir páginas de un PDF en texto plano de la manera más eficiente.
     
-    ESTRATEGIA:
-    1. Intenta extraer texto digital/nativo de la página (Rápido y 100% exacto).
-    2. Si no encuentra texto (ej. página escaneada), aplica OCR con PaddleOCR.
+    ESTRATEGIA REFACTORIZADA (Verdadero Híbrido):
+    1. Extrae el texto digital/nativo disponible en la página.
+    2. Utiliza 'detectar_zonas_ocr_en_pdf_hibrido' para localizar recuadros con imágenes o firmas densas.
+    3. Si existen zonas densas y PaddleOCR está disponible, recorta inteligentemente 
+       dichas coordenadas y les aplica OCR, integrando este texto al resultado final.
 
     NO realiza:
     - Extracción Regex o LLM.
@@ -25,7 +29,7 @@ class PDFHybridExtractor:
     def __init__(self, dpi: int = 200, language: str = "es", min_native_chars: int = 50):
         self.dpi = dpi
         self.language = language
-        self.min_native_chars = min_native_chars # Umbral para decidir si necesita OCR
+        self.min_native_chars = min_native_chars  # Mantenido por compatibilidad de firmas
         self.paddle_ocr = None
         self._inicializar_paddle()
 
@@ -52,7 +56,7 @@ class PDFHybridExtractor:
         return self.paddle_ocr is not None
 
     def extraer(self, pdf_bytes: bytes) -> str:
-        """Procesa el PDF completo combinando extracción nativa y OCR según se necesite."""
+        """Procesa el PDF completo combinando extracción nativa y OCR focalizado por zonas."""
         if not pdf_bytes:
             logger.warning("[PDF Extractor] Se recibió un PDF vacío (0 bytes).")
             return ""
@@ -62,7 +66,7 @@ class PDFHybridExtractor:
         try:
             with fitz.open(stream=pdf_bytes, filetype="pdf") as documento:
                 total_paginas = len(documento)
-                logger.info(f"[PDF Extractor] Procesando documento de {total_paginas} páginas.")
+                logger.info(f"[PDF Extractor] Procesando documento híbrido de {total_paginas} páginas.")
 
                 for num_pag, pagina in enumerate(documento, start=1):
                     texto_pagina = self._procesar_pagina(pagina, num_pag)
@@ -78,28 +82,53 @@ class PDFHybridExtractor:
             return ""
 
     def _procesar_pagina(self, pagina: fitz.Page, num_pag: int) -> str:
-        """Decide inteligentemente si usa lectura nativa u OCR para la página actual."""
-        
-        # 1. Intento de lectura nativa (Digital)
+        """Fusiona texto nativo y OCR quirúrgico basado en análisis de densidad de zonas."""
+        bloques_texto_pagina = []
+
+        # 1. Extraer texto nativo existente en la página
         texto_nativo = pagina.get_text().strip()
-        
-        if len(texto_nativo) >= self.min_native_chars:
-            logger.debug(f"[PDF Extractor] Página {num_pag}: Texto nativo detectado.")
-            return texto_nativo
+        if texto_nativo:
+            logger.debug(f"[PDF Extractor] Página {num_pag}: Texto nativo recuperado ({len(texto_nativo)} caracteres).")
+            bloques_texto_pagina.append(texto_nativo)
 
-        # 2. Si no hay suficiente texto, asumimos que es una imagen escaneada
-        logger.debug(f"[PDF Extractor] Página {num_pag}: Escaneada. Aplicando OCR...")
-        if not self.disponible_ocr:
-            logger.warning(f"[PDF Extractor] Página {num_pag} requiere OCR pero PaddleOCR no está disponible.")
-            return texto_nativo # Retorna lo poco que haya encontrado
-
-        return self._aplicar_ocr(pagina, num_pag)
-
-    def _aplicar_ocr(self, pagina: fitz.Page, num_pag: int) -> str:
-        """Renderiza la página a imagen y ejecuta el modelo OCR."""
+        # 2. Buscar zonas densas de imagen (firmas, sellos, textos escaneados)
         try:
-            # Renderizado de la página a imagen (PixMap)
-            pix = pagina.get_pixmap(dpi=self.dpi)
+            # Reutilizamos los bytes de la página o pasamos el objeto si la función lo soporta.
+            # Como la función nativa suele pedir bytes de un documento, pasamos un fragmento de bytes
+            doc_temporal = fitz.open()
+            doc_temporal.insert_pdf(pagina.parent, from_page=pagina.number, to_page=pagina.number)
+            bytes_monopagina = doc_temporal.tobytes()
+            doc_temporal.close()
+
+            zonas_escaneadas = detectar_zonas_ocr_en_pdf_hibrido(bytes_monopagina)
+        except Exception as exc:
+            logger.error(f"[PDF Extractor] Error al detectar zonas en Página {num_pag}: {exc}")
+            zonas_escaneadas = []
+
+        # 3. Aplicar OCR quirúrgico únicamente si hay zonas detectadas y OCR habilitado
+        if zonas_escaneadas:
+            if not self.disponible_ocr:
+                logger.warning(f"[PDF Extractor] Se detectaron {len(zonas_escaneadas)} zonas en Pág {num_pag} pero PaddleOCR no está disponible.")
+            else:
+                logger.info(f"[PDF Extractor] Página {num_pag}: Procesando {len(zonas_escaneadas)} zonas escaneadas/gráficas mediante OCR.")
+                for idx, zona in enumerate(zonas_escaneadas, start=1):
+                    coordenadas = zona.get("coordenadas")  # Estructura esperada: (x0, y0, x1, y1)
+                    if coordenadas:
+                        texto_ocr_zona = self._aplicar_ocr_en_zona(pagina, coordenadas, num_pag, idx)
+                        if texto_ocr_zona:
+                            bloques_texto_pagina.append(texto_ocr_zona)
+
+        return "\n".join(bloques_texto_pagina).strip()
+
+    def _aplicar_ocr_en_zona(self, pagina: fitz.Page, coordenadas: tuple, num_pag: int, idx_zona: int) -> str:
+        """Renderiza únicamente la sub-región de la página (clip) y ejecuta el OCR."""
+        try:
+            # Usamos el parámetro 'clip' para renderizar solo el área densa detectada
+            # Multiplicamos por la matriz del DPI para no perder nitidez en el recorte
+            zoom = self.dpi / 72  # 72 es el DPI base de PDF
+            matriz = fitz.Matrix(zoom, zoom)
+            
+            pix = pagina.get_pixmap(matrix=matriz, clip=coordenadas)
             img_bytes = pix.tobytes("png")
 
             # Conversión a formato OpenCV para PaddleOCR
@@ -107,50 +136,47 @@ class PDFHybridExtractor:
             imagen_cv2 = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
             if imagen_cv2 is None:
-                raise ValueError("cv2.imdecode retornó None")
+                raise ValueError("cv2.imdecode retornó None al procesar el recorte.")
 
-            # Ejecución del OCR
+            # Ejecución del OCR exclusivo en el recuadro recortado
             resultado = self.paddle_ocr.ocr(imagen_cv2)
+            texto_zona = self._parsear_salida_paddle(resultado)
             
-            return self._parsear_salida_paddle(resultado)
+            if texto_zona.strip():
+                logger.debug(f"[PDF Extractor] Zona {idx_zona} de Pág {num_pag} procesada con éxito.")
+                return texto_zona.strip()
+            
+            return ""
 
         except Exception as exc:
-            logger.error(f"[PDF Extractor] Falló el OCR en la página {num_pag}: {exc}")
+            logger.error(f"[PDF Extractor] Falló el OCR regional en Pág {num_pag}, Zona {idx_zona}: {exc}")
             return ""
 
     @staticmethod
     def _parsear_salida_paddle(resultado_ocr: Any) -> str:
-        """
-        Extrae limpiamente el texto buscando recursivamente en la salida del OCR.
-        Soporta la estructura clásica (tuplas) y la estructura moderna de PaddleX (diccionarios con 'rec_texts').
-        """
+        """ Extrae limpiamente el texto buscando recursivamente en la salida del OCR. """
         if not resultado_ocr:
             return ""
 
         lineas_extraidas = []
 
         def buscar_texto(elemento):
-            # 1. Soporte para la nueva estructura (Diccionarios que contienen 'rec_texts')
             if isinstance(elemento, dict):
                 if 'rec_texts' in elemento and isinstance(elemento['rec_texts'], list):
                     for texto in elemento['rec_texts']:
                         if isinstance(texto, str) and texto.strip():
                             lineas_extraidas.append(texto.strip())
                 else:
-                    # Explorar los valores del diccionario por si hay listas anidadas
                     for valor in elemento.values():
                         buscar_texto(valor)
             
-            # 2. Soporte para listas (iteramos por cada elemento)
             elif isinstance(elemento, list):
                 for item in elemento:
                     if item is not None:
                         buscar_texto(item)
             
-            # 3. Soporte para la estructura clásica (Tuplas de (texto, confianza))
             elif isinstance(elemento, tuple) and len(elemento) == 2:
                 texto = str(elemento[0]).strip()
-                # Verificamos que el segundo elemento sea un número (la confianza)
                 if texto and isinstance(elemento[1], (float, int)):
                     lineas_extraidas.append(texto)
 

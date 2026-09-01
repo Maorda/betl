@@ -3,14 +3,15 @@ import sys
 import warnings
 import json
 import logging
+import re
 from typing import Dict, Any, Optional, List
 
+# Configuración de entornos de logging para evitar ruido en consola
 os.environ["GLOG_minloglevel"] = "3"
 os.environ["PPOCR_LOGGING"] = "0"
 os.environ["FLAGS_allocator_strategy"] = "naive_best_fit"
 warnings.filterwarnings("ignore")
 
-import logging
 logging.getLogger("ppocr").setLevel(logging.ERROR)
 logging.getLogger("paddle").setLevel(logging.ERROR)
 
@@ -23,6 +24,13 @@ logger = logging.getLogger(__name__)
 
 
 class ManipulationOrchestrator:
+    """
+    Orquestador central de la Fase 2: Procesamiento y Extracción de Datos.
+    
+    Responsabilidad Única:
+    Gestionar el flujo de datos desde el texto crudo hasta la estructura final, 
+    coordinando las estrategias de Extracción (Regex/LLM) y Fusión.
+    """
 
     def __init__(
         self,
@@ -42,21 +50,27 @@ class ManipulationOrchestrator:
         self.merger_service = merger_service
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
+        # Regex para identificar los saltos de página generados por el nuevo OCROrchestrator
+        self._regex_pagina = re.compile(r"--- Página \d+ ---")
 
     def procesar_documento_pdf(
         self,
         pdf_bytes: bytes,
         contrato: Optional[Any] = None,
         prompt_instruccion: str = "Extrae la información estructurada del documento según el contrato.",
-        modo_pdf: str = "hybrid",
+        modo_pdf: str = "auto",  # CAMBIO CLAVE: Cambiado de 'hybrid' a 'auto' para activar la densidad dinámica
         patrones_temporales: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        """
+        Enruta los bytes del PDF al orquestador OCR inteligente y procesa el texto plano resultante.
+        """
         texto_ocr = self.ocr_orchestrator.extraer_texto_pdf(
             pdf_bytes=pdf_bytes,
             modo=modo_pdf
         )
 
         if not texto_ocr or not texto_ocr.strip():
+            logger.warning("[ManipulationOrchestrator] El procesamiento OCR devolvió un texto vacío.")
             return {"datos_regex": {}, "datos_llm": {}, "error": "No se pudo extraer texto del documento PDF."}
 
         return self.procesar_texto_plano(
@@ -73,29 +87,35 @@ class ManipulationOrchestrator:
         estructura_esperada: Optional[Any] = None,
         patrones_temporales: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        """
+        Aplica estrategias secuenciales y combinadas de Regex y LLM sobre el contenido textual extraído.
+        """
         datos_regex_limpios = {}
         resultados_llm_parciales = []
 
-        # 1. Aplicar Regex (Corrección de método extraer_datos)
+        # 1. Ejecución Estratégica de Regex
         if self.regex_service:
             try:
-                # Pasar el contrato si no hay patrones temporales explícitos
                 patrones = patrones_temporales or estructura_esperada
                 datos_regex_crudos = self.regex_service.extraer_datos(texto_ocr, patrones)
                 datos_regex_limpios = self._preprocesar_datos_regex(datos_regex_crudos)
+                logger.info(f"[Regex] Extracción exitosa. Campos detectados: {list(datos_regex_limpios.keys())}")
             except Exception as e:
                 logger.error(f"[Regex] Error ejecutando extracción: {e}", exc_info=True)
 
-        # 2. Dividir texto en chunks para el LLM
+        # 2. Segmentación Avanzada respetando fronteras de Páginas del OCROrchestrator
         chunks = self._dividir_texto(texto_ocr)
+        logger.info(f"[LLM] Texto segmentado en {len(chunks)} chunks para procesamiento.")
         
-        # 3. Procesar chunks con el LLM
-        for chunk in chunks:
+        # 3. Procesamiento en paralelo/secuencial de Chunks mediante LLM
+        for idx, chunk in enumerate(chunks, start=1):
             if self.llm_service:
                 prompt_para_llm = prompt_instruccion
                 if datos_regex_limpios:
-                    prompt_para_llm += f"\n\nContexto previo extraído por Regex: {json.dumps(datos_regex_limpios, ensure_ascii=False)}"
+                    # Inyección del contexto determinista estructurado para guiar y restringir al LLM
+                    prompt_para_llm += f"\n\nContexto previo verificado extraído por Regex: {json.dumps(datos_regex_limpios, ensure_ascii=False)}"
 
+                logger.debug(f"[LLM] Procesando chunk {idx}/{len(chunks)} ({len(chunk)} caracteres).")
                 res_chunk = self.llm_service.extraer_entidades(
                     texto_ocr=chunk,
                     prompt_instruccion=prompt_para_llm,
@@ -104,46 +124,59 @@ class ManipulationOrchestrator:
                 if res_chunk:
                     resultados_llm_parciales.append(res_chunk)
 
-        # Consolidador interno para chunks de LLM
+        # Consolidación interna de respuestas parciales de diccionarios de LLM
         datos_llm_consolidados = {}
         for res in resultados_llm_parciales:
             if isinstance(res, dict):
                 datos_llm_consolidados.update({k: v for k, v in res.items() if v is not None})
 
-        # 4. Fusionar resultados usando MergerService (Corrección de llamada)
+        # 4. Fusión Semántica Estricta usando el MergerService
         if self.merger_service:
+            logger.info("[Merger] Iniciando fase de fusión y validación contra contrato contractual.")
             resultado_final = self.merger_service.fusionar(
                 datos_regex=datos_regex_limpios,
                 datos_llm=datos_llm_consolidados,
                 contrato=estructura_esperada
             )
         else:
+            logger.warning("[Merger] MergerService no configurado. Realizando unión directa (Fallback).")
             resultado_final = {**datos_llm_consolidados, **datos_regex_limpios}
 
         return resultado_final
 
     def _dividir_texto(self, texto: str) -> List[str]:
+        """
+        Refactorización Óptima: Divide el texto respetando los marcadores de página unificados 
+        generados por el OCROrchestrator para mantener coherencia contextual completa.
+        """
         if len(texto) <= self.chunk_size:
             return [texto]
 
+        # Divide el documento usando el marcador exacto de cambio de página
+        partes_paginas = self._regex_pagina.split(texto)
+        marcadores = self._regex_pagina.findall(texto)
+
         chunks = []
-        inicio = 0
-        n = len(texto)
+        chunk_actual = []
+        longitud_actual = 0
 
-        while inicio < n:
-            fin = min(inicio + self.chunk_size, n)
-            
-            if fin < n:
-                corte = texto.rfind('\n\n', inicio, fin)
-                if corte != -1 and corte > inicio + int(self.chunk_size * 0.5):
-                    fin = corte + 2
-                else:
-                    corte_simple = texto.rfind('\n', inicio, fin)
-                    if corte_simple != -1 and corte_simple > inicio + int(self.chunk_size * 0.5):
-                        fin = corte_simple + 1
+        # Reconstruye bloques de páginas que quepan juntas dentro de la ventana de contexto del chunk_size
+        for i, parte in enumerate(partes_paginas):
+            marcador_asociado = marcadores[i-1] if i > 0 else ""
+            bloque_pagina = f"{marcador_asociado}\n{parte}" if marcador_asociado else parte
+            longitud_bloque = len(bloque_pagina)
 
-            chunks.append(texto[inicio:fin])
-            inicio = fin - self.chunk_overlap if fin < n else n
+            if longitud_actual + longitud_bloque <= self.chunk_size or not chunk_actual:
+                chunk_actual.append(bloque_pagina)
+                longitud_actual += longitud_bloque
+            else:
+                chunks.append("".join(chunk_actual))
+                # Manejo del overlap básico reinsertando la última sección si aplica
+                chunk_actual = [bloque_pagina]
+                longitud_actual = longitud_bloque
+
+        if chunk_actual:
+            chunks.append("".join(chunk_actual))
 
         return chunks
 

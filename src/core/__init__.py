@@ -21,6 +21,7 @@ from .transformation.merger import MergerService
 
 # Agregamos la importación de la función directa
 from .pipeline import ejecutar_pipeline_etl
+from .pipeline import ETLDocumentPipeline
 
 # 4. Definición de la interfaz pública de tu librería
 __all__ = [
@@ -40,5 +41,6 @@ __all__ = [
     "DtoTransformerUtils",
     "MergerService",
     # Nueva función de acceso rápido
-    "ejecutar_pipeline_etl", 
+    "ejecutar_pipeline_etl",
+    "ETLDocumentPipeline"
 ]
