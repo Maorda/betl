@@ -9,27 +9,15 @@ os.environ["PP_LOG_LEVEL"] = "ERROR"
 os.environ["FLAGS_print_extra_info"] = "0"
 os.environ["PADDLE_OFFICIAL_MODELS_LOG_LEVEL"] = "ERROR"
 
-# Tu función actual para los loggers de Python
-import logging
-
-
 def _silenciar_loggers_ruidosos() -> None:
     loggers = [
-        "ppocr",
-        "paddle",
-        "paddlex",  # Asegúrate de incluir paddlex aquí también
-        "paddle.base",
-        "paddle.fluid",
-        "paddleocr",
-        "PIL",
-        "urllib3",
-        "pdfminer",
+        "ppocr", "paddle", "paddlex", "paddle.base", 
+        "paddle.fluid", "paddleocr", "PIL", "urllib3", "pdfminer"
     ]
     for name in loggers:
         l = logging.getLogger(name)
         l.setLevel(logging.ERROR)
         l.propagate = False
-
 
 _silenciar_loggers_ruidosos()
 
@@ -40,28 +28,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger("ETL-Pipeline")
 
-# Ahora sí, importa tu contrato o modelos de PaddleX
+# Importaciones del Core
 from contrato import MiContratoRemate
-
-from core.decorators.contract import contract
-from core.decorators.strategy import campo, regex_strategy, llm_strategy
-
-# Utilidades
-from core.transformation.factory.mapper_factory import DtoTransformerUtils
-
-# Fase 1: Extracción Física
 from core.extractors.ocr.pdfnative import PDFTextExtractor
 from core.extractors.ocr.pdfscan import PDFOCRExtractor
 from core.extractors.ocr.pdf_hybrid_extractor import PDFHybridExtractor
 from core.extractors.ocr.captcha import CaptchaExtractor
 from core.extractors.ocr.orquestator_ocr import OCROrchestrator
 
-# Fase 2: Manipulación Semántica
 from core.manipulate.strategy.regex import ManipulateRegexService
 from core.manipulate.strategy.llm import ManipulateLLMService
 from core.manipulate.orquestador_manipulacion import ManipulationOrchestrator
 
-# Fase 3: Consolidación
+# Importaciones de la Fase 3 actualizadas
+from core.transformation.factory.mapper_factory import DtoTransformerUtils
 from core.transformation.merger import MergerService
 
 
@@ -75,28 +55,10 @@ def ejecutar_pipeline_etl(
         return None
 
     try:
-        # 1. Instanciar contrato
+        # 1. Instanciar el contrato (Puramente declarativo)
         contrato = MiContratoRemate()
-        
-        # === LOG DE DIAGNÓSTICO 1: Inspeccionar si el contrato tiene campos registrados ===
-        logger.info(f"[DIAGNÓSTICO] Tipo de contrato: {type(contrato)}")
-        
-        # Intentar ver cómo almacena los campos el decorador @contract
-        campos_regex = getattr(contrato, "get_regex_fields", None)
-        campos_llm = getattr(contrato, "get_llm_fields", None)
-        
-        if callable(campos_regex):
-            logger.info(f"[DIAGNÓSTICO] Campos Regex detectados en contrato: {list(campos_regex().keys())}")
-        else:
-            logger.warning("[DIAGNÓSTICO] El contrato NO tiene método get_regex_fields o no está expuesto.")
-            
-        if callable(campos_llm):
-            logger.info(f"[DIAGNÓSTICO] Campos LLM detectados en contrato: {list(campos_llm().keys())}")
-        else:
-            logger.warning("[DIAGNÓSTICO] El contrato NO tiene método get_llm_fields o no está expuesto.")
-        # ==============================================================================
 
-        # FASE 1: EXTRACCIÓN FÍSICA (Solo resolución de captcha y lectura del PDF)
+        # FASE 1: EXTRACCIÓN FÍSICA (OCR)
         ocr_orchestrator = OCROrchestrator(
             extractor_native=PDFTextExtractor(),
             extractor_scan=PDFOCRExtractor(),
@@ -110,30 +72,30 @@ def ejecutar_pipeline_etl(
 
         pdf_bytes = pdf_path.read_bytes()
 
-        # FASE 2: MANIPULACIÓN SEMÁNTICA
-        # FASE 2: MANIPULACIÓN SEMÁNTICA
+        # FASE 2 Y 3: CONFIGURACIÓN DE MANIPULACIÓN Y CONSOLIDACIÓN ESTRUCTURADA
         regex_service = ManipulateRegexService(patrones_iniciales=contrato)
         llm_service = ManipulateLLMService(modelo="qwen3:8b", timeout=250)
+        
+        # Instanciamos el Merger pasándole explícitamente el nuevo utilitario inteligente
+        transformer_util = DtoTransformerUtils()
+        merger_service = MergerService(prioridad_regex=True, transformer=transformer_util)
 
+        # Inyectamos el merger_service dentro del orquestador central
         manipulation_orchestrator = ManipulationOrchestrator(
             ocr_orchestrator=ocr_orchestrator,
             regex_service=regex_service,
             llm_service=llm_service,
+            merger_service=merger_service,  # <-- CORRECCIÓN CLAVE
             chunk_size=8000,
         )
 
-        # resultados_fase2 ya es el diccionario plano con los datos extraídos
-        resultados_fase2 = manipulation_orchestrator.procesar_documento_pdf(
+        # El orquestador ahora hace TODO: extrae texto, ejecuta Regex, ejecuta LLM,
+        # fusiona ambas fuentes, limpia la basura y estructura el DTO final NestJS.
+        resultado_dto = manipulation_orchestrator.procesar_documento_pdf(
             pdf_bytes=pdf_bytes,
             contrato=contrato,
             modo_pdf="hybrid",
         )
-
-        logger.info(f"[Fase 2] Datos extraídos crudos: {resultados_fase2}")
-
-        # FASE 3: TRANSFORMACIÓN DIRECTA AL DTO USANDO EL CONTRATO
-        # Llamamos directamente a tu método adaptador que ya definiste en MiContratoRemate
-        resultado_dto = contrato.adaptar_a_dto(resultados_fase2)
 
         logger.info("=== PIPELINE ETL PROCESADO EXITOSAMENTE ===")
         return resultado_dto

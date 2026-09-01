@@ -59,3 +59,38 @@ class DtoTransformerUtils:
                 if item_mapeado:
                     resultado.append(item_mapeado)
         return resultado
+
+    # ==========================================
+    # NUEVO MÉTODO: Integración con tus Contratos
+    # ==========================================
+    def transformar_por_contrato(self, contrato: Any, datos_extraidos: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Lee la configuración 'mapeo_dto' del contrato y transforma los datos extraídos
+        aplicando de forma automática las reglas de limpieza corporativas.
+        """
+        meta = getattr(contrato, "_metadata", {})
+        mapeo = meta.get("mapeo_dto", {})
+        
+        # Si el contrato no define un mapeo estructural, limpiamos el diccionario plano completo
+        if not mapeo:
+            return self.mapear_seccion(datos_extraidos, mapa_seccion=None)
+
+        resultado: Dict[str, Any] = {}
+        
+        for seccion, campos in mapeo.items():
+            if isinstance(campos, dict):
+                # Caso: Sub-objetos anidados (Ej: 'expediente' o 'predio')
+                # Invertimos el mapa temporalmente porque mapear_seccion busca { dto_key: raw_key }
+                mapa_invertido = {dto_key: raw_key for dto_key, raw_key in campos.items()}
+                
+                seccion_mapeada = self.mapear_seccion(datos_extraidos, mapa_invertido)
+                if seccion_mapeada:  # Solo añadir la sección si contiene datos válidos
+                    resultado[seccion] = seccion_mapeada
+            else:
+                # Caso: Propiedades en la raíz del DTO
+                val_crudo = datos_extraidos.get(campos)
+                val_limpio = self.limpiar(val_crudo)
+                if val_limpio is not None:
+                    resultado[seccion] = val_limpio
+
+        return resultado

@@ -8,6 +8,7 @@ logger = logging.getLogger("MergerService")
 class MergerService:
     def __init__(self, prioridad_regex: bool = True, transformer: Optional[DtoTransformerUtils] = None):
         self.prioridad_regex = prioridad_regex
+        # Inyectamos de manera segura tu fábrica utilitaria ampliada
         self.transformer = transformer or DtoTransformerUtils()
 
     def fusionar(
@@ -25,39 +26,47 @@ class MergerService:
             k: self._normalizar_valor_regex(v) for k, v in datos_regex.items()
         }
 
+        # Une ambas fuentes de información usando tus estrategias de prioridad
         datos_consolidados = self._merge_deep(datos_llm, datos_regex_normalizados)
 
         if contrato:
-            logger.info("Aplicando contrato de mapeo / DTO...")
+            logger.info("Aplicando contrato de mapeo estructural (DTO)...")
             return self._aplicar_contrato(datos_consolidados, contrato)
 
         logger.info("Fusión finalizada sin contrato DTO.")
         return datos_consolidados
 
     def _aplicar_contrato(self, datos: Dict[str, Any], contrato: Union[Type[Any], Any]) -> Dict[str, Any]:
+        """
+        Delega la estructuración y limpieza final a DtoTransformerUtils usando el contrato
+        como un esquema puramente declarativo.
+        """
         try:
+            # Si pasan la clase sin instanciar, resolvemos la instancia de forma segura
             if isinstance(contrato, type):
                 try:
-                    instancia = contrato(transformer=self.transformer)
-                except TypeError:
                     instancia = contrato()
+                except TypeError:
+                    instancia = contrato
+
             else:
                 instancia = contrato
 
+            # =========================================================================
+            # ACOPLAMIENTO PERFECTO: Consumimos la nueva función de DtoTransformerUtils
+            # =========================================================================
+            if hasattr(self.transformer, "transformar_por_contrato"):
+                return self.transformer.transformar_por_contrato(instancia, datos)
+
+            # Fallback seguro en caso de emergencias por si no se encuentra el método
+            logger.warning("DtoTransformerUtils no cuenta con 'transformar_por_contrato'. Usando fallback.")
             if hasattr(instancia, "adaptar_a_dto") and callable(getattr(instancia, "adaptar_a_dto")):
                 return instancia.adaptar_a_dto(datos)
 
-            if hasattr(instancia, "filtrar_y_mapear") and callable(getattr(instancia, "filtrar_y_mapear")):
-                return instancia.filtrar_y_mapear(datos)
-
-            if callable(instancia):
-                return instancia(datos)
-
-            logger.warning("El contrato provisto no posee método de adaptación compatible. Retornando consolidados.")
             return datos
 
         except Exception as e:
-            logger.error(f"Error al aplicar el contrato DTO: {e}", exc_info=True)
+            logger.error(f"Error al aplicar el contrato DTO mediante transformer: {e}", exc_info=True)
             return datos
 
     def _merge_deep(self, base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
@@ -96,7 +105,6 @@ class MergerService:
 
     @staticmethod
     def _normalizar_valor_regex(val: Any) -> Any:
-        # Caso 1: Diccionario con metadatos o valor interno
         if isinstance(val, dict):
             if "value" in val:
                 return MergerService._normalizar_valor_regex(val["value"])
@@ -104,7 +112,6 @@ class MergerService:
                 return MergerService._normalizar_valor_regex(val["_match"])
             return {k: MergerService._normalizar_valor_regex(v) for k, v in val.items() if not k.startswith("_")}
 
-        # Caso 2: Lista de evidencias/coincidencias
         elif isinstance(val, list):
             elementos_normalizados = [
                 MergerService._normalizar_valor_regex(item)
@@ -116,5 +123,4 @@ class MergerService:
             ]
             return ", ".join(elementos_str) if elementos_str else None
 
-        # Caso 3: Primitivos (str, int, float, etc.)
         return val

@@ -75,21 +75,3 @@ class MiContratoRemate:
     )
     def direccion(self) -> None:
         pass
-
-    def adaptar_a_dto(self, datos: Dict[str, Any]) -> Dict[str, Any]:
-        """Aplica el mapeo estructurado definido en los metadatos del contrato."""
-        meta = getattr(self, "_metadata", {})
-        mapeo = meta.get("mapeo_dto", {})
-        if not mapeo:
-            return datos
-
-        resultado: Dict[str, Any] = {}
-        for seccion, campos in mapeo.items():
-            if isinstance(campos, dict):
-                resultado[seccion] = {}
-                for campo_dest, campo_orig in campos.items():
-                    resultado[seccion][campo_dest] = datos.get(campo_orig)
-            else:
-                resultado[seccion] = datos.get(campos)
-
-        return resultado
