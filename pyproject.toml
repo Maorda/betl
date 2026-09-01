@@ -15,14 +15,14 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "ddddocr==1.6.1",
-    "numpy==2.5.2",
-    "opencv_contrib_python==4.10.0.84",
-    "opencv_python==5.0.0.93",
-    "paddleocr==3.7.0",
-    "pydantic==2.13.5",
-    "pymupdf==1.28.2",
-    "Requests==2.34.2",
+    "numpy >= 1.24, < 2.4.0",              # <-- Esto soluciona el conflicto con PaddleX
+    "paddleocr >= 3.7.0",
+    "ddddocr >= 1.6.1",
+    "pydantic >= 2.0.0",
+    "pymupdf >= 1.24.0",
+    "requests >= 2.30.0",
+    "opencv-python >= 4.0.0",
+    "opencv-contrib-python >= 4.0.0",
 ]
 [tool.hatch.build.targets.wheel]
 packages = ["src/core"]
