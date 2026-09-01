@@ -21,20 +21,17 @@ from core.decorators.strategy import campo, regex_strategy, llm_strategy
 class MiContratoRemate:
     """Contrato estructurado para la extracción de datos en edictos de remate judicial."""
 
-    @campo(
-        data_type="string",
-        description="Número único de expediente judicial o de proceso.",
-        required=True,
-    )
     @regex_strategy(
-        pattern=r"(?:Exp\.?|Expediente[:\s]*)?([0-9]{4,5}[-\/][0-9]{4}[-\/][0-9]?[-\/][0-9]{4}[-\/][A-Z]{2}[-\/][A-Z]{2}[-\/][0-9]{2}|[0-9-]+/[0-9]{4})",
+        # Patrón estricto para el formato oficial de 25 caracteres del Poder Judicial de Perú
+        pattern=r"\b([0-9]{5}-[0-9]{4}-[0-9]+-[0-9]{4}-[A-Z]{2}-[A-Z]{2}-[0-9]{2})\b",
         flags=re.IGNORECASE,
         enabled=True,
     )
     @llm_strategy(
         instruction=(
-            "Busca el número de expediente judicial completo (Ej formato: 01234-2023-0-1001-JR-CI-01 "
-            "o similar). Si no lo encuentras exacto, extrae lo más cercano."
+            "Extrae ÚNICAMENTE el número de expediente judicial estándar en su formato completo "
+            "de 25 caracteres (Ejemplo: 00103-2014-0-1408-JR-CI-01). No incluyas etiquetas como "
+            "'EXPEDIENTE:', saltos de línea, ni otros números de trámites como '11/2025'."
         ),
         enabled=True,
     )

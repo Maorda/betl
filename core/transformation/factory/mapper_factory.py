@@ -1,5 +1,5 @@
 from typing import Any, Dict, List, Optional, Set
-
+import re
 
 class DtoTransformerUtils:
     """Servicio utilitario reusable para limpieza y mapeo de secciones DTO."""
@@ -15,6 +15,16 @@ class DtoTransformerUtils:
         txt = str(val).strip()
         if not txt or "Firma Web" in txt or "Descarga componente" in txt:
             return None
+
+        # =========================================================================
+        # NUEVA REGLA: Extractor de rescate para Expedientes Judiciales Peruanos
+        # =========================================================================
+        # Si detecta el patrón oficial de 25 dígitos dentro de un texto sucio, lo aísla.
+        patron_expediente = r"([0-9]{5}-[0-9]{4}-[0-9]+-[0-9]{4}-[A-Z]{2}-[A-Z]{2}-[0-9]{2})"
+        match_exp = re.search(patron_expediente, txt, re.IGNORECASE)
+        if match_exp:
+            return match_exp.group(1).upper() # Devuelve estrictamente el código en mayúsculas
+
         return txt
 
     def mapear_seccion(
