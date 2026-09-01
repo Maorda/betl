@@ -83,6 +83,12 @@ class PDFOCRExtractor:
         La importación es diferida para evitar que la librería
         completa dependa obligatoriamente de PaddleOCR.
         """
+        import os
+        
+        # 1. FIX: Desactivar MKLDNN a nivel de variables de entorno antes de importar
+        # Esto previene el crash de compatibilidad de atributos PIR en Windows
+        os.environ["FLAGS_use_mkldnn"] = "0"
+        os.environ["PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT"] = "0"
 
         try:
 
@@ -90,11 +96,13 @@ class PDFOCRExtractor:
 
             self.paddle_ocr = PaddleOCR(
                 lang=self.language,
+                show_log=self.show_log,    # Respetamos la configuración de tus logs
+                enable_mkldnn=False        # 2. FIX: Desactivar explícitamente en el constructor
             )
 
             logger.info(
                 "[PDF OCR] "
-                "PaddleOCR inicializado correctamente. "
+                "PaddleOCR inicializado correctamente (MKLDNN desactivado). "
                 f"Idioma={self.language}"
             )
 
