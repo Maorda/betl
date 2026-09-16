@@ -1,13 +1,69 @@
-# Byte-compiled / optimized / DLL files
+# ==============================================================================
+# Python Core (Byte-compiled / Optimization / DLL files)
+# ==============================================================================
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
+**/venv
+dantesito.egg-info
+dantesito-chasky.egg-info
+data/
+tests/
 
-# Distribution / packaging
-.Python
+
+# ==============================================================================
+# Virtual Environments & Package Managers
+# ==============================================================================
+.venv/
+venv/
+ENV/
+env/
+pyvenv.cfg
+.pypackages/
+.pip-專案
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ==============================================================================
+# Environment Secrets & Configurations (CRITICAL for security)
+# ==============================================================================
+.env
+.env.*
+!.env.example
+secrets.toml
+
+# ==============================================================================
+# IDEs and Editors
+# ==============================================================================
+# VS Code
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+# PyCharm / JetBrains
+.idea/
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+
+# ==============================================================================
+# Testing & Coverage
+# ==============================================================================
+.pytest_cache/
+.tox/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+nosetests.xml
+coverage.xml
+*.cache
+
+# ==============================================================================
+# Distribution & Packaging
+# ==============================================================================
 build/
 develop-eggs/
 dist/
@@ -26,126 +82,8 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# PyInstaller
-#  Usually these files are written by a python script from a template
-#  before launching pyinstaller
-*.manifest
-*.spec
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Unit test / coverage reports
-htmlcov/
-.toml
-.cache
-.pytest_cache/
-.nofap
-.coverage
-.coverage.*
-.hypothesis/
-.pytest_cache/
-cover/
-
-# Translations
-*.mo
-*.pot
-
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-
-# Flask stuff:
-instance/
-.webassets-cache
-
-# Scrapy stuff:
-.scrapy
-
-# Sphinx documentation
-docs/_build/
-
-# PyBuilder
-.pybuilder/
-target/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
-
-# pyenv
-#   For a library or package, you might want to ignore these files since the setups is
-#   specific to the developer, not the project.
-# .python-version
-
-# pipenv
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   with no cross-platform support, pipenv may install dependencies that don't work, or fail.
-#Pipfile.lock
-
-# poetry
-#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
-#Poetry.lock
-
-# pdm
-#   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
-#pdm.lock
-#   pdm build standard temporary directory
-.pdm-build/
-
-# PEP 582 project packages
-__pypackages__/
-
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath parsed files
-*.sage.py
-
-# Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# pytype static type analyzer
-.pytype/
-
-# Cython debug symbols
-cython_debug/
-
-# IDEs and editors
-.idea/
-.vscode/
-*.swp
-*.swo
+# ==============================================================================
+# Operating System files
+# ==============================================================================
 .DS_Store
+Thumbs.db
